@@ -748,25 +748,31 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
   try
   {
     auto dspPath = std::filesystem::u8path(modelPath.Get());
-    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-
-    // Check that the model has 1 input and 1 output channel
-    if (model->NumInputChannels() != 1)
+    std::unique_ptr<ResamplingNAM> temp = nullptr;
     {
-      throw std::runtime_error("Model must have 1 input channel, but has " + std::to_string(model->NumInputChannels()));
-    }
-    if (model->NumOutputChannels() != 1)
-    {
-      throw std::runtime_error("Model must have 1 output channel, but has "
-                               + std::to_string(model->NumOutputChannels()));
-    }
+      nam::ScopedPrewarmOnResetDefault scoped_prewarm_default(false);
+      std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
 
-    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+      // Check that the model has 1 input and 1 output channel
+      if (model->NumInputChannels() != 1)
+      {
+        throw std::runtime_error("Model must have 1 input channel, but has "
+                                 + std::to_string(model->NumInputChannels()));
+      }
+      if (model->NumOutputChannels() != 1)
+      {
+        throw std::runtime_error("Model must have 1 output channel, but has "
+                                 + std::to_string(model->NumOutputChannels()));
+      }
+
+      temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+      if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
+      {
+        slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
+      }
+    }
+    temp->SetPrewarmOnReset(true);
     temp->Reset(GetSampleRate(), GetBlockSize());
-    if (nam::SlimmableModel* slimmable = temp->GetSlimmableModel())
-    {
-      slimmable->SetSlimmableSize(GetParam(kSlim)->Value());
-    }
     mStagedModel = std::move(temp);
     mNAMPath = modelPath;
     SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, mNAMPath.GetLength(), mNAMPath.Get());
