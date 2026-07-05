@@ -54,13 +54,10 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   OnParamReset(iplug::EParamSource::kPresetRecall);
   LEAVE_PARAMS_MUTEX
 
-  mNAMPath.Set(static_cast<std::string>(config["NAMPath"]).c_str());
+  // We no longer serialize/unserialize NAM path here because we use A/B slots
+  // and we don't save their state by user request.
   mIRPath.Set(static_cast<std::string>(config["IRPath"]).c_str());
 
-  if (mNAMPath.GetLength())
-  {
-    _StageModel(mNAMPath);
-  }
   if (mIRPath.GetLength())
   {
     _StageIR(mIRPath);

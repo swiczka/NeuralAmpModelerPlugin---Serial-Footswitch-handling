@@ -14,6 +14,9 @@
 #include "IPlug_include_in_plug_hdr.h"
 #include "ISender.h"
 
+#include <thread>
+#include <atomic>
+
 
 const int kNumPresets = 1;
 // The plugin is mono inside
@@ -37,7 +40,8 @@ enum EParams
   kToneBass,
   kToneMid,
   kToneTreble,
-  kOutputLevel,
+  kOutputLevelA,
+  kOutputLevelB,
   // The rest is fine though.
   kNoiseGateActive,
   kEQActive,
@@ -50,11 +54,14 @@ enum EParams
   kNumParams
 };
 
-const int numKnobs = 6;
+const int numKnobs = 7;
 
 enum ECtrlTags
 {
-  kCtrlTagModelFileBrowser = 0,
+  kCtrlTagModelFileBrowserA = 0,
+  kCtrlTagModelFileBrowserB,
+  kCtrlTagModelOverlayA,
+  kCtrlTagModelOverlayB,
   kCtrlTagIRFileBrowser,
   kCtrlTagInputMeter,
   kCtrlTagOutputMeter,
@@ -71,7 +78,8 @@ enum ECtrlTags
 enum EMsgTags
 {
   // These tags are used from UI -> DSP
-  kMsgTagClearModel = 0,
+  kMsgTagClearModelA = 0,
+  kMsgTagClearModelB,
   kMsgTagClearIR,
   kMsgTagHighlightColor,
   // The following tags are from DSP -> UI
@@ -228,15 +236,12 @@ private:
   size_t _GetBufferNumChannels() const;
   size_t _GetBufferNumFrames() const;
   void _InitToneStack();
-  // Loads a NAM model and stores it to mStagedNAM
-  // Returns an empty string on success, or an error message on failure.
-  std::string _StageModel(const WDL_String& dspFile);
   // Loads an IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
   dsp::wav::LoadReturnCode _StageIR(const WDL_String& irPath);
 
-  bool _HaveModel() const { return this->mModel != nullptr; };
+  bool _HaveModel() const { return this->mModelA != nullptr || this->mModelB != nullptr; };
   // Prepare the input & output buffers
   void _PrepareBuffers(const size_t numChannels, const size_t numFrames);
   // Manage pointers
@@ -252,6 +257,8 @@ private:
                       const size_t nChansOut);
   // Resetting for models and IRs, called by OnReset
   void _ResetModelAndIR(const double sampleRate, const int maxBlockSize);
+
+  std::string _StageModel(const WDL_String& modelPath, int modelIndex);
 
   void _SetInputGain();
   void _SetOutputGain();
@@ -276,7 +283,15 @@ private:
   void _UpdateMeters(iplug::sample** inputPointer, iplug::sample** outputPointer, const size_t nFrames,
                      const size_t nChansIn, const size_t nChansOut);
 
+  // Serial listener method
+  void _SerialListener();
+
   // Member data
+
+  std::thread mSerialThread;
+  std::atomic<bool> mSerialThreadRunning{false};
+  std::atomic<bool> mToggleModel{false};
+  std::atomic<bool> mActiveModelB{false};
 
   // Input arrays to NAM
   std::vector<std::vector<iplug::sample>> mInputArray;
@@ -293,19 +308,23 @@ private:
   // Noise gates
   dsp::noise_gate::Trigger mNoiseGateTrigger;
   dsp::noise_gate::Gain mNoiseGateGain;
-  // The model actually being used:
-  std::unique_ptr<ResamplingNAM> mModel;
+  // The models actually being used:
+  std::unique_ptr<ResamplingNAM> mModelA;
+  std::unique_ptr<ResamplingNAM> mModelB;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
   // Manages switching what DSP is being used.
-  std::unique_ptr<ResamplingNAM> mStagedModel;
+  std::unique_ptr<ResamplingNAM> mStagedModelA;
+  std::unique_ptr<ResamplingNAM> mStagedModelB;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
   // Flags to take away the modules at a safe time.
-  std::atomic<bool> mShouldRemoveModel = false;
+  std::atomic<bool> mShouldRemoveModelA = false;
+  std::atomic<bool> mShouldRemoveModelB = false;
   std::atomic<bool> mShouldRemoveIR = false;
 
   std::atomic<bool> mNewModelLoadedInDSP = false;
-  std::atomic<bool> mModelCleared = false;
+  std::atomic<bool> mModelClearedA = false;
+  std::atomic<bool> mModelClearedB = false;
 
   // Tone stack modules
   std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;
@@ -315,7 +334,8 @@ private:
   //  recursive_linear_filter::LowPass mLowPass;
 
   // Path to model's config.json or model.nam
-  WDL_String mNAMPath;
+  WDL_String mNAMPathA;
+  WDL_String mNAMPathB;
   // Path to IR (.wav file)
   WDL_String mIRPath;
 
